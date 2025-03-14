@@ -32,6 +32,7 @@ for country in countries:
         AND od.order_final_status = 'DeliveredStatus'
         AND od.order_parent_relationship_type IS NULL
         AND od.order_is_prime=true
+        AND od.order_vertical='QCommerce'
 )
 SELECT * FROM prime_orders
     '''
@@ -122,7 +123,7 @@ client = gspread.authorize(credentials)
 
 file_title = 'KZ KG - Prime AOV Buckets'
 spreadsheet = client.open(file_title)
-sheet = spreadsheet.worksheet('data')
+sheet = spreadsheet.worksheet('data1')
 
 data = [group_metrics.columns.tolist()] + group_metrics.values.tolist()
 sheet.clear()
