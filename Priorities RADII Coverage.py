@@ -35,8 +35,8 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['NUR']
-partner = ['KFC']
+cities = ['ALA']
+partner = ['Burger King']
 partner_value = partner[0]
 
 # Periodos (usamos solo current period)
@@ -60,28 +60,19 @@ WITH hexagons AS (
     FROM delta.central_h3_hexagons_odp.city_h3_hexagons h
     WHERE city_code IN ({cities_str})
 ),
-partner_stores AS (
-    SELECT ARRAY_AGG(DISTINCT store_address_id) AS store_ids
-    FROM delta.central_order_descriptors_odp.order_descriptors_v2
-    WHERE store_name = '{partner_value}'
-        AND order_country_code IN ({countries_str})
-        AND order_city_code IN ({cities_str})
-),
 sessions_data AS (
     SELECT
         ds.h8_hexagon AS hex_hash,
         COUNT(ds.dynamic_session_id) AS Sessions,
-        cast(coalesce(count(distinct case when count_ce__order_created > 0   AND ov.store_name='{partner_value}' and ov.dynamic_session_id is not NULL then ds.dynamic_session_id else null end), 0) as double) /
+        cast(coalesce(count(distinct case when count_ce__order_created > 0  and ov.dynamic_session_id is not NULL then ds.dynamic_session_id else null end), 0) as double) /
         cast(count(distinct ds.dynamic_session_id) as double) as CVR
     FROM hexagons AS hh
     LEFT JOIN delta.customer_behaviour_odp.dynamic_sessions_v1 AS ds 
         ON ds.h8_hexagon = hh.h8_hexagon
     LEFT JOIN delta.customer_behaviour_odp.enriched_backend_event__checkout_order_created_v3 AS ov 
         ON ov.dynamic_session_id = ds.dynamic_session_id
-    CROSS JOIN partner_stores ps
     WHERE 
-        CARDINALITY(ARRAY_INTERSECT(ds.visited_store_address_ids, ps.store_ids)) > 0
-        AND ds.country_code IN ({countries_str})
+         ds.country_code IN ({countries_str})
         AND ds.city_code IN ({cities_str})
         AND date(ds.session_start_time_local) BETWEEN date('{start_date_cp}') AND date('{finish_date_cp}')
     GROUP BY 1
@@ -103,7 +94,6 @@ orders AS (
         AND date(od.p_creation_date) BETWEEN date('{start_date_cp}') AND date('{finish_date_cp}')
         AND ov.order_final_status = 'DeliveredStatus'
         AND ov.order_parent_relationship_type IS NULL
-        AND ov.store_name = '{partner_value}'
     GROUP BY 1
 )
 SELECT 
@@ -351,14 +341,14 @@ for metric in metrics:
     legend_html += "</div>"
     m.get_root().html.add_child(folium.Element(legend_html))
 
-    file_name = f"priority_{metric_label}.html"
+    file_name = f"coverage_{metric_label}.html"
     m.save(file_name)
 
     # -----------------------------
     # Subir el mapa a Google Drive
     # -----------------------------
     SCOPES = ["https://www.googleapis.com/auth/drive"]
-    SERVICE_ACCOUNT_FILE = "mineral-name-431814-h3-568ae02587f4.json"
+    SERVICE_ACCOUNT_FILE = "/Users/pedro.lucioglovoapp.com/Documents/05_Otros/02_Cred/mineral-name-431814-h3-568ae02587f4.json"
     FOLDER_ID = "1eFXAe26dE2XZuQFtWzSn4j7ifs_cYwrN"
 
     creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
