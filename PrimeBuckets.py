@@ -13,7 +13,7 @@ conn_details = {
 }
 
 # 1. Ejecutar la query principal para obtener las métricas por cliente, incluyendo PLTV
-countries = ['KZ','KG']
+countries = ['KZ']
 all_data = []
 
 for country in countries:
@@ -33,6 +33,7 @@ for country in countries:
         AND od.order_parent_relationship_type IS NULL
         AND od.order_is_prime=true
         AND od.order_vertical='QCommerce'
+        AND od.store_name='SMALL'
 )
 SELECT * FROM prime_orders
     '''
@@ -92,9 +93,10 @@ group_metrics = df_cities.groupby(['country', 'bucket']).agg(
 ).reset_index()
 
 # Agregar columna para mostrar el intervalo de AOV (ej. "100 - 200")
-group_metrics['aov_interval'] = group_metrics.apply(
-    lambda row: f"{int(row['aov_min'])} - {int(row['aov_max'])}", axis=1
-)
+group_metrics['aov_interval'] = [
+    f"{int(min_val)} - {int(max_val)}"
+    for min_val, max_val in zip(group_metrics['aov_min'], group_metrics['aov_max'])
+]
 
 # Calcular la proporción de orders por bucket respecto al total de orders por país
 group_metrics['orders_ratio'] = group_metrics['total_orders'] / group_metrics.groupby('country')['total_orders'].transform('sum')

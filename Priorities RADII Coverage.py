@@ -35,7 +35,7 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['ALA']
+cities = ['NUR']
 partner = ['Burger King']
 partner_value = partner[0]
 
