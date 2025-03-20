@@ -35,9 +35,9 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['NUR']
-partner = ['Burger King']
-partner_value = partner[0]
+cities = ['UKK']
+#partner = ['Burger King']
+#partner_value = partner[0]
 
 # Periodos (usamos solo current period)
 start_date_cp = '2024-12-01'
@@ -119,23 +119,23 @@ display(df.head())
 # -----------------------------
 # Query SQL Stores
 # -----------------------------
-query2 = f"""
-SELECT DISTINCT(sa.store_address_id), sa.h3_hash_8, h.h3_8_center_lat as h3_8_lat,
-       h.h3_8_center_lon as h3_8_lon, h.h3_8_polygon_wkt AS h3_geom, 
-       COALESCE(store_address_maximum_delivery_distance_meters, store_maximum_delivery_distance) AS store_address_maximum_delivery_distance_meters
-FROM "delta"."partner_stores_odp"."store_addresses_v2" sa
-   LEFT JOIN delta.central_h3_hexagons_odp.city_h3_hexagons h ON h.h3_8_hash = sa.h3_hash_8
-   LEFT JOIN "delta"."partner_stores_odp"."stores_v2" s ON sa.store_id = s.store_id
-WHERE sa.p_end_date IS NULL
-  AND s.p_end_date IS NULL
-  AND s.store_is_enabled = TRUE
-  AND store_address_is_deleted = FALSE
-  AND s.store_name = '{partner_value}'
-  AND s.city_code IN ({cities_str})
-"""
-with trino.dbapi.connect(**conn_details) as conn:
-    store = pd.read_sql_query(query2, conn)
-display(store.head())
+#query2 = f"""
+#SELECT DISTINCT(sa.store_address_id), sa.h3_hash_8, h.h3_8_center_lat as h3_8_lat,
+#       h.h3_8_center_lon as h3_8_lon, h.h3_8_polygon_wkt AS h3_geom,
+#       COALESCE(store_address_maximum_delivery_distance_meters, store_maximum_delivery_distance) AS store_address_maximum_delivery_distance_meters
+#FROM "delta"."partner_stores_odp"."store_addresses_v2" sa
+#   LEFT JOIN delta.central_h3_hexagons_odp.city_h3_hexagons h ON h.h3_8_hash = sa.h3_hash_8
+#   LEFT JOIN "delta"."partner_stores_odp"."stores_v2" s ON sa.store_id = s.store_id
+#WHERE sa.p_end_date IS NULL
+#  AND s.p_end_date IS NULL
+#  AND s.store_is_enabled = TRUE
+#  AND store_address_is_deleted = FALSE
+#  AND s.store_name = '{partner_value}'
+#  AND s.city_code IN ({cities_str})
+#"""
+#with trino.dbapi.connect(**conn_details) as conn:
+#    store = pd.read_sql_query(query2, conn)
+#display(store.head())
 
 # -----------------------------
 # Filtrar únicamente Current Period (ya que la query solo devuelve ese periodo)
@@ -190,9 +190,6 @@ for metric in metrics:
 
 # -----------------------------
 # Creación de columnas numéricas para cada bucket
-
-
-
 # -----------------------------
 def extract_upper_limit(bucket):
     if isinstance(bucket, str):
@@ -289,7 +286,7 @@ for metric in metrics:
         ).add_to(m)
 
     # Eliminar registros con coordenadas NaN en store
-    store = store.dropna(subset=['h3_8_lat', 'h3_8_lon'])
+   # store = store.dropna(subset=['h3_8_lat', 'h3_8_lon'])
 
     # Agregar iconos de tiendas al mapa
    # for _, row in store.iterrows():
@@ -300,22 +297,22 @@ for metric in metrics:
    #     ).add_to(m)
 
     # Agregar círculos con radio de la dirección de la tienda
-    for _, row in store.iterrows():
-        # Agregar marcador con icono de tienda
-        folium.Marker(
-            location=[row['h3_8_lat'], row['h3_8_lon']],
-            popup=f"Store ID: {row['store_address_id']}",
-            icon=folium.Icon(color='blue', icon="shopping-cart", prefix="fa")  # Icono de tienda
-        ).add_to(m)
+   # for _, row in store.iterrows():
+   #     # Agregar marcador con icono de tienda
+   #     folium.Marker(
+   #         location=[row['h3_8_lat'], row['h3_8_lon']],
+   #         popup=f"Store ID: {row['store_address_id']}",
+   #         icon=folium.Icon(color='blue', icon="shopping-cart", prefix="fa")  # Icono de tienda
+   #     ).add_to(m)
 
         # Agregar radio con nuevo esquema de colores
-        folium.Circle(
-            location=[row['h3_8_lat'], row['h3_8_lon']],
-            radius=row['store_address_maximum_delivery_distance_meters'],
-            color="gray",  # Color del borde más neutro
-            fill_opacity=0.4,
-            fill_color="lightblue",  # Relleno azul claro en vez de amarillo
-        ).add_to(m)
+   #     folium.Circle(
+   #         location=[row['h3_8_lat'], row['h3_8_lon']],
+   #         radius=row['store_address_maximum_delivery_distance_meters'],
+   #         color="gray",  # Color del borde más neutro
+   #         fill_opacity=0.4,
+   #         fill_color="lightblue",  # Relleno azul claro en vez de amarillo
+   #     ).add_to(m)
 
         # Generar leyenda para la métrica
     legend_html = f"""

@@ -35,9 +35,9 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['NUR']
-partner = ['KFC']
-partner_value = partner[0]
+cities = ['UKK']
+#partner = ['KFC']
+#partner_value = partner[0]
 
 # Periodos (usamos solo current period)
 start_date_cp = '2024-12-01'
@@ -71,7 +71,9 @@ sessions_data AS (
     SELECT
         ds.h8_hexagon AS hex_hash,
         COUNT(ds.dynamic_session_id) AS Sessions,
-        cast(coalesce(count(distinct case when count_ce__order_created > 0   AND ov.store_name='{partner_value}' and ov.dynamic_session_id is not NULL then ds.dynamic_session_id else null end), 0) as double) /
+        cast(coalesce(count(distinct case when count_ce__order_created > 0   
+        AND ov.store_name='{partner_value}' 
+        and ov.dynamic_session_id is not NULL then ds.dynamic_session_id else null end), 0) as double) /
         cast(count(distinct ds.dynamic_session_id) as double) as CVR
     FROM hexagons AS hh
     LEFT JOIN delta.customer_behaviour_odp.dynamic_sessions_v1 AS ds 
@@ -103,7 +105,7 @@ orders AS (
         AND date(od.p_creation_date) BETWEEN date('{start_date_cp}') AND date('{finish_date_cp}')
         AND ov.order_final_status = 'DeliveredStatus'
         AND ov.order_parent_relationship_type IS NULL
-        AND ov.store_name = '{partner_value}'
+        --AND ov.store_name = '{partner_value}'
     GROUP BY 1
 )
 SELECT 
