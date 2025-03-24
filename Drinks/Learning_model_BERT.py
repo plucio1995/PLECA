@@ -1,13 +1,13 @@
 import trino
 import pandas as pd
 import numpy as np
-import spacy
+import torch
+from transformers import BertTokenizer, BertModel
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from scipy.sparse import csr_matrix
 from joblib import Parallel, delayed
-from IPython.display import display
 import datetime
 
 #############################################
@@ -21,17 +21,11 @@ conn_details = {
     'http_scheme': 'https',
     'auth': trino.auth.OAuth2Authentication()
 }
-# Prueba de conexión
-with trino.dbapi.connect(**conn_details) as conn:
-    df_test = pd.read_sql_query('select 1', conn)
-display(df_test.head())
 
 # Lista de países a procesar
-base_date = (datetime.date.today() - datetime.timedelta(days=90)).strftime('%Y-%m-%d')
-countries = ['KZ']
+base_date = (datetime.date.today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+countries = ['PL']
 all_data = []
-
-'{country}'
 
 for country in countries:
     query_products = f'''
@@ -43,13 +37,13 @@ for country in countries:
         FROM delta.central_order_descriptors_odp.order_descriptors_v2 od
         WHERE od.order_final_status = 'DeliveredStatus'
           AND od.order_vertical = 'Food'
-          AND od.order_country_code IN ('{country}')
+          AND od.order_country_code = '{country}'
           AND date(od.order_activated_local_at) >= date('{base_date}')
     ),
     max_day_cte AS (
         SELECT DISTINCT CAST(p_snapshot_date AS DATE) AS day
         FROM delta.partner_product_availability_odp.product_availability_v2
-        WHERE date(p_snapshot_date)>= date('{base_date}')
+        WHERE date(p_snapshot_date) >= date('{base_date}')
     )
     SELECT DISTINCT
         s.order_country_code,
@@ -58,8 +52,7 @@ for country in countries:
         pa.product_name
     FROM delta.partner_product_availability_odp.product_availability_v2 pa
     INNER JOIN stores s
-        ON s.store_address_id = pa.store_address_id,
-        max_day_cte
+        ON s.store_address_id = pa.store_address_id
     WHERE CAST(pa.p_snapshot_date AS DATE) IN (SELECT day FROM max_day_cte)
       AND pa.product_is_available = TRUE
       AND pa.product_name IS NOT NULL
@@ -68,118 +61,104 @@ for country in countries:
         df_tmp = pd.read_sql_query(query_products, conn)
     all_data.append(df_tmp)
 
-print(df_tmp.head())
-
-# Unificar los datos extraídos en un solo DataFrame
 df_products = pd.concat(all_data, ignore_index=True)
 print("Datos extraídos de Starburst:")
 print(df_products.head())
 
-# Mostrar la distribución de países en df_products
-print("\nDistribución de order_country_code en df_products:")
-print(df_products['order_country_code'].value_counts())
-
 #############################################
 # 2. Carga del dataset de entrenamiento y creación de modelos por país
 #############################################
-# Cargar el dataset de entrenamiento (debe contener las columnas 'order_country_code', 'product_name' y 'Category')
 df_train = pd.read_csv(
     "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/PLECA orders with Drinks - Drinks Total.csv")
-print("\nDataset de entrenamiento:")
-print(df_train.head())
 
-# Mostrar la distribución de países en df_train
-print("\nDistribución de order_country_code en df_train:")
-print(df_train['order_country_code'].value_counts())
+# Cargar modelo y tokenizer de BERT
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+bert_model = BertModel.from_pretrained('bert-base-uncased')
 
-# Cargar spaCy y definir función para extraer embeddings de texto
-nlp = spacy.load('en_core_web_md')  # Modelo preentrenado con embeddings
+# Función optimizada para obtener embeddings en batch
+def get_bert_embeddings_batch(text_list, batch_size=16):
+    embeddings = []
+    device = torch.device("mps" if torch.backends.mps.is_built() else "cpu")  # Usar GPU si está disponible
+    bert_model.to(device)
+
+    for i in range(0, len(text_list), batch_size):
+        batch = text_list[i:i + batch_size]
+        inputs = tokenizer(batch, padding=True, truncation=True, max_length=512, return_tensors='pt').to(device)
+
+        with torch.no_grad():
+            outputs = bert_model(**inputs)
+
+        batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()  # Mover resultados a CPU si es necesario
+        embeddings.extend(batch_embeddings)
+
+    return np.array(embeddings)
 
 
-def get_embeddings(text):
-    doc = nlp(text)
-    return doc.vector
-
-
-# Crear modelos por país utilizando únicamente 'product_name'
+# Entrenar modelos por país
 models_by_country = {}
-grouped_train = df_train.groupby('order_country_code')
-
-for country, group in grouped_train:
-    print(f"\nEntrenando modelo para el país: {country}")
-    # Extraer embeddings para cada producto (revisa que no existan valores nulos)
+for country, group in df_train.groupby('order_country_code'):
+    print(f"\nEntrenando modelo para {country}")
     group = group.dropna(subset=['product_name'])
+
     if group.empty:
         print(f"  - No hay datos en el grupo para {country}.")
         continue
-    X_embeddings = np.array([get_embeddings(name) for name in group['product_name']])
+
+    X_embeddings = get_bert_embeddings_batch(group['product_name'].tolist())
     X = csr_matrix(X_embeddings)
     y = group['Category']
 
-    # Dividir en entrenamiento y prueba
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # Entrenar el modelo (RandomForest)
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(X_train, y_train)
 
-    # Evaluar el modelo
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
     print(f"  - Accuracy para {country}: {acc}")
     print(classification_report(y_test, y_pred, zero_division=0))
 
-    # Guardar el modelo (no se utiliza vectorizador al usar embeddings)
-    models_by_country[country] = {'model': model, 'vectorizer': None}
+    models_by_country[country] = model
 
 #############################################
 # 3. Preprocesamiento y predicción en df_products
 #############################################
-# Precomputar embeddings para todos los nombres de productos en df_products si aún no existen
 if 'precomputed_embeddings' not in df_products.columns:
-    print("\nPrecomputando embeddings para df_products...")
-    # Asegurarse de que product_name no tenga valores nulos
+    print("\nPrecomputando embeddings en batch para df_products...")
     df_products = df_products.dropna(subset=['product_name'])
-    df_products['precomputed_embeddings'] = df_products['product_name'].apply(get_embeddings)
+    df_products['precomputed_embeddings'] = list(get_bert_embeddings_batch(df_products['product_name'].tolist()))
     print("Embeddings precomputados.")
 
 
-# Función para predecir la categoría por país utilizando únicamente 'product_name'
 def predict_for_country(country, group):
     if country not in models_by_country:
-        print(f"Advertencia: No hay modelo entrenado para el país: {country}")
+        print(f"Advertencia: No hay modelo entrenado para {country}")
         return None
-    print(f"Prediciendo categorías para el país: {country}")
-    model = models_by_country[country]['model']
-    # Asegurarse de que no haya valores nulos en product_name
-    group = group.dropna(subset=['product_name']).copy()
+
+    print(f"Prediciendo categorías para {country}")
+    model = models_by_country[country]
+    group = group.dropna(subset=['product_name'])
+
     if group.empty:
         print(f"  - El grupo para {country} está vacío tras eliminar nulos.")
         return None
-    embeddings_batch = np.vstack(group['precomputed_embeddings'])
-    X_features = csr_matrix(embeddings_batch)
-    predictions = model.predict(X_features)
-    group['predicted_category'] = predictions
+
+    X_features = csr_matrix(np.vstack(group['precomputed_embeddings']))
+    group['predicted_category'] = model.predict(X_features)
     return group
 
 
-# Agrupar df_products por país y procesar en paralelo
 grouped_products = df_products.groupby('order_country_code')
 results = Parallel(n_jobs=-1)(
     delayed(predict_for_country)(country, group) for country, group in grouped_products
 )
 
-# Filtrar resultados no nulos y concatenar
 results = [res for res in results if res is not None]
 if results:
     df_products_predicted = pd.concat(results, ignore_index=True)
-    # (Opcional) Eliminar la columna de embeddings precomputados para limpiar el DataFrame final
-    if 'precomputed_embeddings' in df_products_predicted.columns:
-        df_products_predicted = df_products_predicted.drop(columns=['precomputed_embeddings'])
+    df_products_predicted.drop(columns=['precomputed_embeddings'], inplace=True, errors='ignore')
     print("\nDataFrame con categorías predichas:")
     print(df_products_predicted.head())
+    df_products_predicted.to_csv("predicciones_productos_PL_3_BERT.csv", index=False)
 else:
-    print("No se obtuvieron predicciones para ningún país.")
-
-
-df_products_predicted.to_csv("predicciones_productosKZ2.csv", index=False)
+    print("No se obtuvieron predicciones.")

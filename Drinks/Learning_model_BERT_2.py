@@ -31,8 +31,6 @@ base_date = (datetime.date.today() - datetime.timedelta(days=90)).strftime('%Y-%
 countries = ['KZ']
 all_data = []
 
-'{country}'
-
 for country in countries:
     query_products = f'''
     WITH stores AS (
@@ -49,7 +47,7 @@ for country in countries:
     max_day_cte AS (
         SELECT DISTINCT CAST(p_snapshot_date AS DATE) AS day
         FROM delta.partner_product_availability_odp.product_availability_v2
-        WHERE date(p_snapshot_date)>= date('{base_date}')
+        WHERE date(p_snapshot_date) >= date('{base_date}')
     )
     SELECT DISTINCT
         s.order_country_code,
@@ -103,16 +101,36 @@ def get_embeddings(text):
 
 # Crear modelos por país utilizando únicamente 'product_name'
 models_by_country = {}
+# Filtrar filas con valores nulos en product_name o Category
+df_train = df_train.dropna(subset=['product_name', 'Category'])
 grouped_train = df_train.groupby('order_country_code')
 
 for country, group in grouped_train:
     print(f"\nEntrenando modelo para el país: {country}")
-    # Extraer embeddings para cada producto (revisa que no existan valores nulos)
-    group = group.dropna(subset=['product_name'])
+    # Eliminar nulos en product_name y Category (ya se hizo globalmente, pero se refuerza)
+    group = group.dropna(subset=['product_name', 'Category'])
     if group.empty:
         print(f"  - No hay datos en el grupo para {country}.")
         continue
-    X_embeddings = np.array([get_embeddings(name) for name in group['product_name']])
+
+    # Extraer embeddings y descartar aquellos que contengan NaN
+    embeddings_list = []
+    valid_indices = []
+    for idx, name in group['product_name'].iteritems():
+        emb = get_embeddings(name)
+        if np.isnan(emb).any():
+            print(f"  - El embedding para '{name}' contiene NaN y se descarta.")
+        else:
+            embeddings_list.append(emb)
+            valid_indices.append(idx)
+
+    if not embeddings_list:
+        print(f"  - No se obtuvieron embeddings válidos para {country}.")
+        continue
+
+    # Filtrar el grupo según los índices válidos
+    group = group.loc[valid_indices]
+    X_embeddings = np.array(embeddings_list)
     X = csr_matrix(X_embeddings)
     y = group['Category']
 
@@ -156,7 +174,20 @@ def predict_for_country(country, group):
     if group.empty:
         print(f"  - El grupo para {country} está vacío tras eliminar nulos.")
         return None
-    embeddings_batch = np.vstack(group['precomputed_embeddings'])
+    # Asegurarse de que los embeddings sean válidos
+    valid_embeddings = []
+    valid_indices = []
+    for idx, emb in group['precomputed_embeddings'].iteritems():
+        if np.isnan(emb).any():
+            print(f"  - Embedding inválido en índice {idx} para {country}.")
+        else:
+            valid_embeddings.append(emb)
+            valid_indices.append(idx)
+    if not valid_embeddings:
+        print(f"  - No hay embeddings válidos para {country} en df_products.")
+        return None
+    group = group.loc[valid_indices]
+    embeddings_batch = np.vstack(valid_embeddings)
     X_features = csr_matrix(embeddings_batch)
     predictions = model.predict(X_features)
     group['predicted_category'] = predictions
@@ -180,6 +211,5 @@ if results:
     print(df_products_predicted.head())
 else:
     print("No se obtuvieron predicciones para ningún país.")
-
 
 df_products_predicted.to_csv("predicciones_productosKZ2.csv", index=False)
