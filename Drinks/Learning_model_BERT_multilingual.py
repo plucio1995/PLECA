@@ -24,7 +24,7 @@ conn_details = {
 
 # Lista de países a procesar
 base_date = (datetime.date.today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
-countries = ['KG']
+countries = ['AM']
 all_data = []
 
 for country in countries:
@@ -158,6 +158,6 @@ if results:
     df_products_predicted.drop(columns=['precomputed_embeddings'], inplace=True, errors='ignore')
     print("\nDataFrame con categorías predichas:")
     print(df_products_predicted.head())
-    df_products_predicted.to_csv("predicciones_productos_KG_4_MultilingualBERT.csv", index=False)
+    df_products_predicted.to_csv("predicciones_productos_AM_4_MultilingualBERT.csv", index=False)
 else:
     print("No se obtuvieron predicciones.")

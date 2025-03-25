@@ -8,7 +8,7 @@ import os
 # -----------------------------
 # Leer predicciones
 # -----------------------------
-file_path = "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/predicciones_productos_KG_3_BERT.csv"
+file_path = "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/predicciones_productos_KG_4_MultilingualBERT.csv"
 df = pd.read_csv(file_path)
 df['predicted_category'] = df['predicted_category'].str.strip().str.lower()
 
@@ -226,7 +226,7 @@ file_title = 'PLECA Drink Analysis'
 spreadsheet = client.open(file_title)
 
 # Exportar datos de órdenes a la hoja "data_UA"
-sheet = spreadsheet.worksheet('data_KG')
+sheet = spreadsheet.worksheet('data_KG_2')
 sheet.clear()
 sheet.update('A1', export_data)
 print("Datos exportados a Google Sheets (hoja data_KG).")
@@ -236,7 +236,7 @@ stores_data = [["Country", "City", "Store Name"]]
 for _, row in stores_no_drinks[['order_country_code', 'order_city_code', 'store_name']].drop_duplicates().iterrows():
     stores_data.append([row['order_country_code'], row['order_city_code'], row['store_name']])
 
-sheet_partners = spreadsheet.worksheet('data_partners_KG')
+sheet_partners = spreadsheet.worksheet('data_partners_KG_2')
 sheet_partners.clear()
 sheet_partners.update('A1', stores_data)
 print("Datos de las tiendas sin drinks exportados a la hoja 'data_partners_UA'.")
