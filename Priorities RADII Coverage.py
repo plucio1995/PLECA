@@ -34,12 +34,12 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['KGF']
+cities = ['NUR']
 # Lista de partners a iterar
-partners = ['KFC', 'Кафишка', 'Bibigon','Burger King','Центр Плова','Doner Avenue Burger','Coffee Boom','Salam Bro','Донер Love','Два Пельменя','Nice Dog','Europharma','Degirmen','Black Berry','Lanzhou']
+partners = ['Gippo']
 # Periodos (usamos solo current period)
-start_date_cp = '2025-02-01'
-finish_date_cp = '2025-03-21'
+start_date_cp = '2025-01-01'
+finish_date_cp = '2025-03-31'
 
 # Convertir listas en formato SQL
 countries_str = ", ".join(f"'{c}'" for c in countries)

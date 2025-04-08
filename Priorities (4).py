@@ -35,13 +35,13 @@ display(df_test.head())
 # Parámetros iniciales
 # -----------------------------
 countries = ['KZ']
-cities = ['UKK']
-#partner = ['KFC']
-#partner_value = partner[0]
+cities = ['CIT']
+partner = ['Gippo']
+partner_value = partner[0]
 
 # Periodos (usamos solo current period)
-start_date_cp = '2024-12-01'
-finish_date_cp = '2025-02-28'
+start_date_cp = '2025-01-01'
+finish_date_cp = '2025-03-31'
 
 # Convertir listas en formato SQL
 countries_str = ", ".join(f"'{c}'" for c in countries)
@@ -360,7 +360,7 @@ for metric in metrics:
     # Subir el mapa a Google Drive
     # -----------------------------
     SCOPES = ["https://www.googleapis.com/auth/drive"]
-    SERVICE_ACCOUNT_FILE = "mineral-name-431814-h3-568ae02587f4.json"
+    SERVICE_ACCOUNT_FILE = "/Users/pedro.lucioglovoapp.com/Documents/05_Otros/02_Cred/mineral-name-431814-h3-568ae02587f4.json"
     FOLDER_ID = "1eFXAe26dE2XZuQFtWzSn4j7ifs_cYwrN"
 
     creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)

@@ -9,6 +9,8 @@ from sklearn.model_selection import train_test_split
 from scipy.sparse import csr_matrix
 from joblib import Parallel, delayed
 import datetime
+import re
+from unidecode import unidecode
 
 #############################################
 # 1. Conexión a Starburst y extracción de productos
@@ -22,14 +24,27 @@ conn_details = {
     'auth': trino.auth.OAuth2Authentication()
 }
 
-# Lista de países a procesar
 base_date = (datetime.date.today() - datetime.timedelta(days=30)).strftime('%Y-%m-%d')
-countries = ['AM']
+countries = ['PL']
 all_data = []
 
 for country in countries:
     query_products = f'''
-    WITH stores AS (
+  WITH top_partners AS (
+    SELECT
+        store_name,
+        COUNT(DISTINCT order_id) AS orders
+    FROM delta.central_order_descriptors_odp.order_descriptors_v2
+    WHERE
+        DATE(order_activated_local_at) >= DATE('{base_date}')
+        AND order_country_code = '{country}'
+        AND order_final_status = 'DeliveredStatus'
+        AND order_parent_relationship_type IS NULL
+        AND store_name IS NOT NULL
+    GROUP BY store_name
+    ORDER BY orders DESC
+    LIMIT 300
+), stores AS (
         SELECT DISTINCT
             order_country_code,
             store_address_id,
@@ -37,6 +52,7 @@ for country in countries:
         FROM delta.central_order_descriptors_odp.order_descriptors_v2 od
         WHERE od.order_final_status = 'DeliveredStatus'
           AND od.order_vertical = 'Food'
+          AND od.store_name = 'McDonald''s'
           AND od.order_country_code = '{country}'
           AND date(od.order_activated_local_at) >= date('{base_date}')
     ),
@@ -53,6 +69,7 @@ for country in countries:
     FROM delta.partner_product_availability_odp.product_availability_v2 pa
     INNER JOIN stores s
         ON s.store_address_id = pa.store_address_id
+    INNER JOIN top_partners p ON s.store_name = p.store_name    
     WHERE CAST(pa.p_snapshot_date AS DATE) IN (SELECT day FROM max_day_cte)
       AND pa.product_is_available = TRUE
       AND pa.product_name IS NOT NULL
@@ -68,8 +85,7 @@ print(df_products.head())
 #############################################
 # 2. Carga del dataset de entrenamiento y creación de modelos por país
 #############################################
-df_train = pd.read_csv(
-    "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/PLECA orders with Drinks - Drinks Total.csv")
+df_train = pd.read_csv("/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/PLECA orders with Drinks - Drinks Total.csv")
 
 # Cargar modelo y tokenizer de Multilingual BERT
 tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
@@ -78,7 +94,7 @@ bert_model = BertModel.from_pretrained('bert-base-multilingual-cased')
 # Función optimizada para obtener embeddings en batch
 def get_bert_embeddings_batch(text_list, batch_size=16):
     embeddings = []
-    device = torch.device("mps" if torch.backends.mps.is_built() else "cpu")  # Usar GPU si está disponible
+    device = torch.device("mps" if torch.backends.mps.is_built() else "cpu")  # Usa GPU si está disponible
     bert_model.to(device)
 
     for i in range(0, len(text_list), batch_size):
@@ -88,7 +104,7 @@ def get_bert_embeddings_batch(text_list, batch_size=16):
         with torch.no_grad():
             outputs = bert_model(**inputs)
 
-        batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()  # Extraer el token [CLS]
+        batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()  # Token [CLS]
         embeddings.extend(batch_embeddings)
 
     return np.array(embeddings)
@@ -98,7 +114,6 @@ models_by_country = {}
 for country, group in df_train.groupby('order_country_code'):
     print(f"\nEntrenando modelo para {country}")
     group = group.dropna(subset=['product_name'])
-
     if group.empty:
         print(f"  - No hay datos en el grupo para {country}.")
         continue
@@ -107,6 +122,7 @@ for country, group in df_train.groupby('order_country_code'):
     X = csr_matrix(X_embeddings)
     y = group['Category']
 
+    from sklearn.model_selection import train_test_split
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
     model = RandomForestClassifier(n_estimators=100, random_state=42)
@@ -128,7 +144,6 @@ if 'precomputed_embeddings' not in df_products.columns:
     df_products['precomputed_embeddings'] = list(get_bert_embeddings_batch(df_products['product_name'].tolist()))
     print("Embeddings precomputados.")
 
-
 def predict_for_country(country, group):
     if country not in models_by_country:
         print(f"Advertencia: No hay modelo entrenado para {country}")
@@ -137,27 +152,29 @@ def predict_for_country(country, group):
     print(f"Prediciendo categorías para {country}")
     model = models_by_country[country]
     group = group.dropna(subset=['product_name'])
-
     if group.empty:
         print(f"  - El grupo para {country} está vacío tras eliminar nulos.")
         return None
 
+    # Convertir las embeddings precomputadas a una matriz CSR
     X_features = csr_matrix(np.vstack(group['precomputed_embeddings']))
+    # Convertir los índices e indptr a np.int32 para evitar el error
+    X_features.indices = X_features.indices.astype(np.int32)
+    X_features.indptr = X_features.indptr.astype(np.int32)
+
     group['predicted_category'] = model.predict(X_features)
     return group
-
 
 grouped_products = df_products.groupby('order_country_code')
 results = Parallel(n_jobs=-1)(
     delayed(predict_for_country)(country, group) for country, group in grouped_products
 )
-
 results = [res for res in results if res is not None]
 if results:
     df_products_predicted = pd.concat(results, ignore_index=True)
     df_products_predicted.drop(columns=['precomputed_embeddings'], inplace=True, errors='ignore')
     print("\nDataFrame con categorías predichas:")
     print(df_products_predicted.head())
-    df_products_predicted.to_csv("predicciones_productos_AM_4_MultilingualBERT.csv", index=False)
+    df_products_predicted.to_csv("McDonalds.csv", index=False)
 else:
     print("No se obtuvieron predicciones.")
