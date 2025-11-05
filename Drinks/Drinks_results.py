@@ -11,7 +11,7 @@ import math
 # -----------------------------
 # Leer predicciones
 # -----------------------------
-file_path = "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/test products_PL_6.csv"
+file_path = "/Users/pedro.lucioglovoapp.com/PycharmProjects/PLECA/Drinks/test products_UA_8.csv"
 df = pd.read_csv(file_path)
 df['predicted_category'] = df['predicted_category'].str.strip().str.lower()
 
@@ -27,11 +27,11 @@ conn_details = {
     'auth': trino.auth.OAuth2Authentication()
 }
 
-# Base date: Últimos 30 días
+# Base date: últimos 90 días (modifica según lo que necesites)
 base_date = (datetime.date.today() - datetime.timedelta(days=90)).strftime('%Y-%m-%d')
 
 # Lista de países a procesar
-countries = ['PL']
+countries = ['UA']
 all_orders = []
 
 # -----------------------------
@@ -53,7 +53,7 @@ for country in countries:
           AND store_name IS NOT NULL
       GROUP BY store_name
       ORDER BY orders DESC
-      LIMIT 300
+      LIMIT 100
     )
     SELECT
           od.order_id,
@@ -71,7 +71,7 @@ for country in countries:
       LEFT JOIN
           delta.customer_bought_products_odp.bought_products_v2 bp
           ON bp.order_id = od.order_id
-      INNER JOIN
+      LEFT JOIN
           top_partners tp
           ON od.store_name = tp.store_name
       WHERE
@@ -88,17 +88,19 @@ for country in countries:
 # Combinar todas las órdenes
 df_orders = pd.concat(all_orders, ignore_index=True)
 
+# -----------------------------
 # Hacer JOIN con categorías predichas
+# -----------------------------
 df_orders = df_orders.merge(df[['product_id', 'predicted_category']], on='product_id', how='left')
 
-# Filtrar órdenes donde la categoría está definida
+# Filtrar órdenes donde la categoría está definida (puedes quitar este filtro si deseas trabajar con todas)
 df_orders = df_orders[df_orders['predicted_category'].notna() & (df_orders['predicted_category'] != '')]
 
 # Filtrar solo productos clasificados como Drinks
 df_drinks_orders = df_orders[df_orders['predicted_category'].isin(['drink', 'drinks'])]
 
 # -----------------------------
-# Cálculo de métricas
+# Cálculo de métricas globales por país
 # -----------------------------
 results_per_country = {}
 
@@ -109,7 +111,7 @@ for country in countries:
     num_orders = df_country['order_id'].nunique()
     num_orders_with_drinks = df_country_drinks['order_id'].nunique()
 
-    # AOV para todas las órdenes
+    # AOV para todas las órdenes (agrupamos por order_id para garantizar órdenes únicas)
     aov_local = df_country.groupby('order_id')['order_transacted_value_local'].first().mean()
     aov_eur = df_country.groupby('order_id')['order_transacted_value_eur'].first().mean()
 
@@ -151,17 +153,13 @@ for country in countries:
         "AOV_eur Orders No Drinks": round(aov_eur_no_drinks, 2) if pd.notna(aov_eur_no_drinks) else None,
         "Productos sin categoría predicha o vacía": missing_or_empty_categories_count,
         "Productos con categoría predicha": products_with_category_count,
-        "% Partners with Drinks": None,  # Se asigna en otra parte
+        "% Partners with Drinks": None,  # Se asigna más adelante
         "% Exclusively Drinks Orders": round(percent_exclusively_drink, 2)
     }
 
 # -----------------------------
-# Top 50 partners orders with drinks y total orders
+# Top 100 partners: obtener todos, tengan orders con drinks o no
 # -----------------------------
-# -----------------------------
-# Top 100 partners: Obtener todos, tengan orders con drinks o no
-# -----------------------------
-# Extraer la lista de top partners a partir de df_orders (donde Top_partner no es nulo)
 top_partners_list = df_orders[df_orders['Top_partner'].notna()]['store_name'].unique()
 
 # Total de órdenes para cada top partner
@@ -173,7 +171,7 @@ orders_total_by_top_partner = (
     .rename(columns={'order_id': 'total_orders'})
 )
 
-# Órdenes con drinks para cada top partner (puede dar 0 si no hay)
+# Órdenes con drinks para cada top partner
 orders_with_drinks = (
     df_drinks_orders[df_drinks_orders['store_name'].isin(top_partners_list)]
     .groupby('store_name')['order_id']
@@ -182,17 +180,11 @@ orders_with_drinks = (
     .rename(columns={'order_id': 'orders_with_drinks'})
 )
 
-# Crear un DataFrame con todos los top partners
+# Crear DataFrame con todos los top partners y unir métricas de órdenes
 df_top_partners = pd.DataFrame({'store_name': top_partners_list})
-
-# Hacer merge para incorporar las órdenes con drinks, rellenando con 0 donde falte
 df_top_partners = df_top_partners.merge(orders_with_drinks, on='store_name', how='left')
 df_top_partners['orders_with_drinks'] = df_top_partners['orders_with_drinks'].fillna(0)
-
-# Incorporar el total de órdenes
 df_top_partners = df_top_partners.merge(orders_total_by_top_partner, on='store_name', how='left')
-
-# Ordenar, por ejemplo, de mayor a menor por órdenes con drinks
 df_top_partners = df_top_partners.sort_values(by='orders_with_drinks', ascending=False)
 
 orders_by_top_partner = df_top_partners.merge(orders_total_by_top_partner, on='store_name', how='left')
@@ -201,11 +193,11 @@ orders_by_top_partner = df_top_partners.merge(orders_total_by_top_partner, on='s
 # Top partners sin productos Coca-Cola
 # -----------------------------
 mask_coca = df_orders['product_name'].str.contains(
-    r'(coca|koka|kokakola|კოკა|კოკაკოლა|კოლა|кока|кола|կոկა|կոկակոլა|կոլა|Cola|Coca)',
+    r'(coca|koka|kokakola|კოკა|კოკაკოლა|კოლა|кока|кола|կոկա|կոկակոլա|կոլա|Cola|Coca)',
     case=False, na=False, regex=True
 )
 mask_pepsi = df_orders['product_name'].str.contains(
-    r'(pepsi|პეპსი|пепси|փեփսი|пепсi|Պեպսի|Пепсi)',
+    r'(pepsi|პეპსი|пепси|փեփսի|пепсi|Պեպսი|Пепсi)',
     case=False, na=False, regex=True
 )
 coca_partners_1 = df_orders[mask_coca]['store_name'].unique()
@@ -213,7 +205,7 @@ pepsi_partners = df_orders[mask_pepsi]['store_name'].unique()
 coca_partners = set(coca_partners_1) | set(pepsi_partners)
 top_partners_no_coca = [partner for partner in top_partners_list if partner not in coca_partners]
 
-# Calcular el número de órdenes para cada partner en top_no_coca
+# Calcular número de órdenes para cada partner en top_no_coca
 df_top_no_coca_orders = (
     df_orders[df_orders['store_name'].isin(top_partners_no_coca)]
     .groupby('store_name')['order_id']
@@ -221,8 +213,6 @@ df_top_no_coca_orders = (
     .reset_index()
     .rename(columns={'order_id': 'orders_count'})
 )
-
-# Preparar la data para exportar a Sheets con la nueva columna "Orders Count"
 top_no_coca_data = [["Store Name", "Orders Count"]] + df_top_no_coca_orders.values.tolist()
 
 # -----------------------------
@@ -245,7 +235,7 @@ for country in countries:
           AND store_name IS NOT NULL
       GROUP BY store_name
       ORDER BY orders DESC
-      LIMIT 300
+      LIMIT 100
     ),
     stores AS (
         SELECT
@@ -254,7 +244,7 @@ for country in countries:
             store_address_id,
             od.store_name
         FROM delta.central_order_descriptors_odp.order_descriptors_v2 od
-        INNER JOIN top_partners tp ON tp.store_name = od.store_name
+        LEFT JOIN top_partners tp ON tp.store_name = od.store_name
         WHERE od.order_final_status = 'DeliveredStatus'
           AND od.order_vertical = 'Food'
           AND od.order_country_code = '{country}'
@@ -298,7 +288,8 @@ tiendas_drinks = df_stores.groupby('store_name')['predicted_category'].apply(
 )
 tiendas_drinks = tiendas_drinks[tiendas_drinks].index.tolist()
 df_stores_unique = df_stores[['order_country_code', 'order_city_code', 'store_name']].drop_duplicates()
-# Calcular el número de órdenes para cada partner y city
+
+# Calcular número de órdenes por partner y city
 partner_orders = (
     df_orders
     .groupby(['order_country_code', 'order_city_code', 'store_name'])['order_id']
@@ -306,83 +297,24 @@ partner_orders = (
     .reset_index()
     .rename(columns={'order_id': 'orders_count'})
 )
-# Hacer merge con el DataFrame de tiendas que ya incluye city, para obtener la métrica diferenciada
-df_stores_unique = df_stores[['order_country_code', 'order_city_code', 'store_name']].drop_duplicates()
 df_stores_unique = df_stores_unique.merge(partner_orders, on=['order_country_code', 'order_city_code', 'store_name'], how='left')
 df_stores_no_drinks = df_stores_unique[~df_stores_unique['store_name'].isin(tiendas_drinks)]
-
-# Calcular el porcentaje de partners con drinks por país
-pct_partners_per_country = {}
-for country in countries:
-    df_stores_country = df_stores[df_stores['order_country_code'] == country]
-    total_partners = df_stores_country['store_name'].nunique()
-    partners_with_drinks = df_stores_country[
-        df_stores_country['store_name'].isin(tiendas_drinks)
-    ]['store_name'].nunique()
-    pct = (partners_with_drinks / total_partners * 100) if total_partners > 0 else None
-    pct_partners_per_country[country] = round(pct, 2) if pct is not None else None
-
-# Actualizar resultados con la métrica de partners con drinks
-for country in countries:
-    results_per_country[country]["% Partners with Drinks"] = pct_partners_per_country.get(country, None)
-
-# -----------------------------
-# Preparar datasets para exportar a Sheets
-# -----------------------------
-export_data = [["Country", "Total Orders", "Orders with Drinks", "AOV_local Orders",
-                "AOV_eur Orders", "AOV_local Orders Drinks", "AOV_eur Orders Drinks",
-                "AOV_local Orders No Drinks", "AOV_eur Orders No Drinks",
-                "Productos sin categoría predicha o vacía", "Productos con categoría predicha",
-                "% Partners with Drinks", "% Exclusively Drinks Orders"]]
-for country, metrics in results_per_country.items():
-    export_data.append([
-        country,
-        metrics["Orders"],
-        metrics["Orders with Drinks"],
-        metrics["AOV_local Orders"],
-        metrics["AOV_eur Orders"],
-        metrics["AOV_local Orders Drinks"],
-        metrics["AOV_eur Orders Drinks"],
-        metrics["AOV_local Orders No Drinks"],
-        metrics["AOV_eur Orders No Drinks"],
-        metrics["Productos sin categoría predicha o vacía"],
-        metrics["Productos con categoría predicha"],
-        metrics["% Partners with Drinks"],
-        metrics["% Exclusively Drinks Orders"]
-    ])
-
-stores_data = [["Country", "City", "Store Name", "Orders"]]
-for _, row in df_stores_no_drinks[['order_country_code', 'order_city_code', 'store_name', 'orders_count']].drop_duplicates().iterrows():
-    stores_data.append([
-        row['order_country_code'],
-        row['order_city_code'],
-        row['store_name'],
-        row['orders_count']
-    ])
 
 # -----------------------------
 # Top 10 drinks (nombres normalizados)
 # -----------------------------
 def normalize_product_name(name):
-    # Transliterar a caracteres latinos y limpiar el nombre
     name = unidecode(name)
     name = name.lower().strip()
-    # Remover números con unidades de medida (ej: 200ml, 500 ml, 1l, etc.)
     name = re.sub(r'\b\d+\s?(ml|l|g|gr)\b', '', name)
-    # Eliminar dígitos, puntos, paréntesis y comillas
     name = re.sub(r'[-,\d\.\(\)\'"\s]', '', name)
-    # Eliminar espacios múltiples
     name = re.sub(r'\s+', ' ', name)
     name = name.strip()
-    # Si la normalización resulta en "kokakola", se cambia a "cocacola"
     if name == "kokakola":
         name = "cocacola"
     return name
 
-# Aplicar la función al DataFrame de drinks
 df_drinks_orders['normalized_product_name'] = df_drinks_orders['product_name'].apply(normalize_product_name)
-
-# Calcular el top 10 drinks usando el nombre normalizado (seleccionamos hasta 50)
 top10_drinks = (
     df_drinks_orders
     .groupby('normalized_product_name')['bought_product_quantity']
@@ -392,7 +324,55 @@ top10_drinks = (
     .reset_index()
 )
 top10_data = [list(top10_drinks.columns)] + top10_drinks.values.tolist()
-top50_data = [list(orders_by_top_partner.columns)] + orders_by_top_partner.values.tolist()
+
+# -----------------------------
+# Cálculo del AOV en EUR por partner: total, con drinks y sin drinks
+# -----------------------------
+# Agrupar órdenes únicas para evitar duplicados (agrupamos por store_name y order_id)
+df_orders_unique = df_orders.groupby(['store_name', 'order_id'])['order_transacted_value_eur'].first().reset_index()
+df_drinks_orders_unique = df_drinks_orders.groupby(['store_name', 'order_id'])['order_transacted_value_eur'].first().reset_index()
+
+# AOV total por partner
+aov_eur_all_by_partner = (
+    df_orders_unique
+    .groupby('store_name')['order_transacted_value_eur']
+    .mean()
+    .reset_index()
+    .rename(columns={'order_transacted_value_eur': 'AOV_eur_all'})
+)
+
+# AOV para órdenes con drinks
+aov_eur_drinks_by_partner = (
+    df_drinks_orders_unique
+    .groupby('store_name')['order_transacted_value_eur']
+    .mean()
+    .reset_index()
+    .rename(columns={'order_transacted_value_eur': 'AOV_eur_drinks'})
+)
+
+# AOV para órdenes sin drinks (filtramos aquellas órdenes que no aparecen en drinks)
+order_ids_with_drinks = df_drinks_orders['order_id'].unique()
+df_orders_no_drinks = df_orders[~df_orders['order_id'].isin(order_ids_with_drinks)]
+df_orders_no_drinks_unique = df_orders_no_drinks.groupby(['store_name', 'order_id'])['order_transacted_value_eur'].first().reset_index()
+aov_eur_no_drinks_by_partner = (
+    df_orders_no_drinks_unique
+    .groupby('store_name')['order_transacted_value_eur']
+    .mean()
+    .reset_index()
+    .rename(columns={'order_transacted_value_eur': 'AOV_eur_no_drinks'})
+)
+
+# Unir estos cálculos al DataFrame de top partners
+df_top_partners = df_top_partners.merge(aov_eur_drinks_by_partner, on='store_name', how='left')
+df_top_partners = df_top_partners.merge(aov_eur_no_drinks_by_partner, on='store_name', how='left')
+df_top_partners = df_top_partners.merge(aov_eur_all_by_partner, on='store_name', how='left')
+df_top_partners['AOV_eur_drinks'] = df_top_partners['AOV_eur_drinks'].round(2)
+df_top_partners['AOV_eur_no_drinks'] = df_top_partners['AOV_eur_no_drinks'].round(2)
+df_top_partners['AOV_eur_all'] = df_top_partners['AOV_eur_all'].round(2)
+
+# Preparar el DataFrame final para la pestaña df_top50_drinks
+df_top50_drinks = df_top_partners.copy()
+top50_data = [list(df_top50_drinks.columns)] + df_top50_drinks.values.tolist()
 
 # -----------------------------
 # Funciones para sanitizar datos (evitar NaN, Infinity, etc.)
@@ -405,10 +385,31 @@ def sanitize_cell(value):
 def sanitize_data(data):
     return [[sanitize_cell(cell) for cell in row] for row in data]
 
-sanitized_export_data    = sanitize_data(export_data)
-sanitized_stores_data    = sanitize_data(stores_data)
-sanitized_top10_data     = sanitize_data(top10_data)
-sanitized_top50_data     = sanitize_data(top50_data)
+sanitized_export_data = sanitize_data([["Country", "Total Orders", "Orders with Drinks", "AOV_local Orders",
+                "AOV_eur Orders", "AOV_local Orders Drinks", "AOV_eur Orders Drinks",
+                "AOV_local Orders No Drinks", "AOV_eur Orders No Drinks",
+                "Productos sin categoría predicha o vacía", "Productos con categoría predicha",
+                "% Partners with Drinks", "% Exclusively Drinks Orders"]] +
+                [[
+                    country,
+                    metrics["Orders"],
+                    metrics["Orders with Drinks"],
+                    metrics["AOV_local Orders"],
+                    metrics["AOV_eur Orders"],
+                    metrics["AOV_local Orders Drinks"],
+                    metrics["AOV_eur Orders Drinks"],
+                    metrics["AOV_local Orders No Drinks"],
+                    metrics["AOV_eur Orders No Drinks"],
+                    metrics["Productos sin categoría predicha o vacía"],
+                    metrics["Productos con categoría predicha"],
+                    metrics["% Partners with Drinks"],
+                    metrics["% Exclusively Drinks Orders"]
+                ] for country, metrics in results_per_country.items()])
+
+sanitized_stores_data = sanitize_data([["Country", "City", "Store Name", "Orders"]] +
+                                df_stores_no_drinks[['order_country_code', 'order_city_code', 'store_name', 'orders_count']].drop_duplicates().values.tolist())
+sanitized_top10_data = sanitize_data(top10_data)
+sanitized_top50_data = sanitize_data(top50_data)
 sanitized_top_no_coca_data = sanitize_data(top_no_coca_data)
 
 # -----------------------------
@@ -425,28 +426,28 @@ spreadsheet = client.open(file_title)
 
 # Exportar hoja data_
 try:
-    sheet = spreadsheet.worksheet('data_PL')
+    sheet = spreadsheet.worksheet('data_UA')
     sheet.clear()
 except gspread.exceptions.WorksheetNotFound:
-    sheet = spreadsheet.add_worksheet(title='data_PL', rows="100", cols="20")
+    sheet = spreadsheet.add_worksheet(title='data_UA', rows="100", cols="20")
 sheet.update(sanitized_export_data, 'A1')
 print("Datos exportados a Google Sheets (hoja data).")
 
 # Exportar hoja data_partners_
 try:
-    sheet_partners = spreadsheet.worksheet('data_partners_PL')
+    sheet_partners = spreadsheet.worksheet('data_partners_UA')
     sheet_partners.clear()
 except gspread.exceptions.WorksheetNotFound:
-    sheet_partners = spreadsheet.add_worksheet(title='data_partners_PL', rows="100", cols="20")
+    sheet_partners = spreadsheet.add_worksheet(title='data_partners_UA', rows="100", cols="20")
 sheet_partners.update(sanitized_stores_data, 'A1')
 print("Datos de las tiendas sin drinks exportados a la hoja data_partners_.")
 
 # Exportar hoja top10_drinks_
 try:
-    sheet_top10 = spreadsheet.worksheet('top10_drinks_PL')
+    sheet_top10 = spreadsheet.worksheet('top10_drinks_UA')
     sheet_top10.clear()
 except gspread.exceptions.WorksheetNotFound:
-    sheet_top10 = spreadsheet.add_worksheet(title='top10_drinks_PL', rows="100", cols="20")
+    sheet_top10 = spreadsheet.add_worksheet(title='top10_drinks_UA', rows="100", cols="20")
 sheet_top10.update(sanitized_top10_data, 'A1')
 print("Datos del Top 10 drinks exportados a Google Sheets (hoja top10_drinks_).")
 
@@ -457,14 +458,14 @@ try:
 except gspread.exceptions.WorksheetNotFound:
     sheet_top50_drinks = spreadsheet.add_worksheet(title='df_top50_drinks', rows="100", cols="20")
 sheet_top50_drinks.update(sanitized_top50_data, 'A1')
-print("Datos del Top 50 partners orders with drinks exportados a Google Sheets (hoja df_top50_drinks).")
+print("Datos del Top 50 partners orders with drinks (con AOV) exportados a Google Sheets (hoja df_top50_drinks).")
 
 # Exportar hoja top_no_coca_
 try:
-    sheet_top_no_coca = spreadsheet.worksheet('top_no_coca_PL')
+    sheet_top_no_coca = spreadsheet.worksheet('top_no_coca_UA')
     sheet_top_no_coca.clear()
 except gspread.exceptions.WorksheetNotFound:
-    sheet_top_no_coca = spreadsheet.add_worksheet(title='top_no_coca_PL', rows="100", cols="20")
+    sheet_top_no_coca = spreadsheet.add_worksheet(title='top_no_coca_UA', rows="100", cols="20")
 sheet_top_no_coca.update(sanitized_top_no_coca_data, 'A1')
 print("Datos de Top partners sin productos Coca-Cola exportados a Google Sheets (hoja top_no_coca_).")
 

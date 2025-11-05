@@ -36,10 +36,10 @@ display(df_test.head())
 countries = ['KZ']
 cities = ['NUR']
 # Lista de partners a iterar
-partners = ['Gippo']
+partners = [ 'Hardee''s']
 # Periodos (usamos solo current period)
-start_date_cp = '2025-01-01'
-finish_date_cp = '2025-03-31'
+start_date_cp = '2025-05-01'
+finish_date_cp = '2025-07-13'
 
 # Convertir listas en formato SQL
 countries_str = ", ".join(f"'{c}'" for c in countries)
@@ -273,7 +273,7 @@ for partner_value in partners:
       AND s.p_end_date IS NULL
       AND s.store_is_enabled = TRUE
       AND store_address_is_deleted = FALSE
-      AND s.store_name = '{partner_value}'
+      AND s.store_name  = 'Hardee''s'
       AND s.city_code IN ({cities_str})
     """
     with trino.dbapi.connect(**conn_details) as conn:
